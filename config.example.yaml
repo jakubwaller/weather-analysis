@@ -1,0 +1,53 @@
+# Copy this file to config.yaml and adjust it to your setup.
+# config.yaml is git-ignored, so your token stays local.
+
+location:
+  # Used for the Open-Meteo outside weather. Find yours e.g. on open-meteo.com.
+  latitude: 50.075
+  longitude: 14.437
+  timezone: Europe/Prague
+
+database:
+  path: data/weather.db
+
+open_meteo:
+  enabled: true
+  # Metrics collected from the free Open-Meteo API (no API key needed).
+  metrics:
+    - temperature
+    - apparent_temperature
+    - humidity
+    - pressure
+    - wind_speed
+    - precipitation
+    - cloud_cover
+
+home_assistant:
+  enabled: true
+  url: http://homeassistant.local:8123
+  # Long-lived access token. Create one in Home Assistant under
+  # your profile -> Security -> Long-lived access tokens.
+  # You can also leave this out and set the HA_TOKEN environment variable.
+  token: ${HA_TOKEN}
+  sensors:
+    - entity_id: sensor.living_room_temperature
+      name: Living room
+      area: inside
+      metric: temperature
+    - entity_id: sensor.bedroom_temperature
+      name: Bedroom
+      area: inside
+      metric: temperature
+    - entity_id: sensor.balcony_temperature
+      name: Balcony
+      area: outside
+      metric: temperature
+    # Any numeric sensor works, e.g. humidity:
+    # - entity_id: sensor.living_room_humidity
+    #   name: Living room
+    #   area: inside
+    #   metric: humidity
+
+collection:
+  # Interval used by `weather-analysis collect --loop`.
+  interval_minutes: 10
