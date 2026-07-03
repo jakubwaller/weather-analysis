@@ -1,0 +1,19 @@
+# local config contains your Home Assistant token
+config.yaml
+config.yml
+
+# collected data
+data/
+*.db
+
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+.pytest_cache/
+.DS_Store
