@@ -7,7 +7,7 @@ Two entry points:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -15,6 +15,10 @@ from ..config import Config
 from ..db import Measurement
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+# The archive serves the same variable names with no usable lag, so history has no
+# 92-day ceiling. fetch_current stays on the forecast endpoint: it is the only one
+# with a `current` block.
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
 # our metric name -> (open-meteo variable, unit)
 METRICS = {
@@ -68,17 +72,19 @@ def fetch_current(config: Config, session: requests.Session | None = None) -> li
 
 def fetch_history(config: Config, days: int,
                   session: requests.Session | None = None) -> list[Measurement]:
-    """Hourly history for the past `days` days (up to 92, an Open-Meteo limit)."""
+    """Hourly history for the past `days` days, from the Open-Meteo archive."""
     metrics = _selected_metrics(config)
     http = session or requests
+    end_date = datetime.now(timezone.utc).date()
+    start_date = end_date - timedelta(days=days)
     resp = http.get(
-        FORECAST_URL,
+        ARCHIVE_URL,
         params={
             "latitude": config.latitude,
             "longitude": config.longitude,
             "hourly": ",".join(var for var, _ in metrics.values()),
-            "past_days": min(days, 92),
-            "forecast_days": 1,
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "end_date": end_date.strftime("%Y-%m-%d"),
             "timezone": "UTC",
         },
         timeout=60,
