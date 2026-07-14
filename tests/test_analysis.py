@@ -3,7 +3,13 @@ from datetime import timedelta
 import pandas as pd
 import pytest
 
-from weather_analysis.analysis import daily_frame, prepare_series, resample_rule, sensor_labels
+from weather_analysis.analysis import (
+    contiguous_blocks,
+    daily_frame,
+    prepare_series,
+    resample_rule,
+    sensor_labels,
+)
 
 
 def frame(rows) -> pd.DataFrame:
@@ -84,3 +90,32 @@ def test_daily_frame_derives_min_max_when_statistics_absent():
     daily = daily_frame(df, "temperature")
     assert daily["min"].iloc[0] == pytest.approx(20.0)
     assert daily["max"].iloc[0] == pytest.approx(22.0)
+
+
+def test_contiguous_blocks_splits_on_gap_days():
+    # plotly's tonexty fill spans NaN, so the band must be drawn per block
+    ts = list(pd.date_range("2026-04-04", periods=2, freq="1D", tz="UTC")) + \
+         list(pd.date_range("2026-06-08", periods=3, freq="1D", tz="UTC"))
+    df = frame([(t, "Bedroom", "inside", "temperature", 21.0) for t in ts])
+    daily = daily_frame(df, "temperature")
+
+    blocks = list(contiguous_blocks(daily))
+
+    assert len(blocks) == 2
+    assert len(blocks[0]) == 2
+    assert len(blocks[1]) == 3
+    # no block may contain a gap day
+    assert all(b["mean"].notna().all() for b in blocks)
+
+
+def test_contiguous_blocks_returns_one_block_when_unbroken():
+    ts = pd.date_range("2026-07-01", periods=4, freq="1D", tz="UTC")
+    df = frame([(t, "Bedroom", "inside", "temperature", 21.0) for t in ts])
+    blocks = list(contiguous_blocks(daily_frame(df, "temperature")))
+    assert len(blocks) == 1
+    assert len(blocks[0]) == 4
+
+
+def test_contiguous_blocks_on_frame_without_the_metric():
+    df = frame([(pd.Timestamp("2026-07-01", tz="UTC"), "Bedroom", "inside", "humidity", 50.0)])
+    assert list(contiguous_blocks(daily_frame(df, "temperature"))) == []
