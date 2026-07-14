@@ -63,6 +63,23 @@ def test_open_meteo_history_skips_future_and_none():
     assert [(r.metric, r.value) for r in rows] == [("temperature", 20.0)]
 
 
+def test_open_meteo_history_uses_archive_without_day_cap():
+    now = datetime.now(timezone.utc)
+    past = now.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+    session = FakeSession({
+        "hourly": {"time": [past], "temperature_2m": [20.0], "relative_humidity_2m": [50]},
+    })
+    open_meteo.fetch_history(config(), days=365, session=session)
+
+    assert session.last_url == open_meteo.ARCHIVE_URL
+    assert "past_days" not in session.last_params
+    assert "forecast_days" not in session.last_params
+    # 365 days must not be clamped to the old 92-day ceiling
+    start = datetime.strptime(session.last_params["start_date"], "%Y-%m-%d").date()
+    assert (now.date() - start).days == 365
+    assert session.last_params["end_date"] == now.date().strftime("%Y-%m-%d")
+
+
 def test_ha_current_parses_and_skips_unavailable():
     session = FakeSession({
         "state": "23.4",
