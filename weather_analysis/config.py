@@ -28,6 +28,7 @@ class Sensor:
     name: str
     area: str = "inside"  # 'inside' or 'outside'
     metric: str = "temperature"
+    valid_range: tuple[float, float] | None = None  # overrides the area default
 
 
 @dataclass
@@ -43,6 +44,8 @@ class Config:
     ha_token: str = ""
     ha_sensors: list[Sensor] = field(default_factory=list)
     interval_minutes: int = 10
+    # metric -> area -> (low, high); overrides validate.DEFAULT_RANGES
+    validation_ranges: dict[str, dict[str, tuple[float, float]]] = field(default_factory=dict)
 
 
 def _expand_env(value):
@@ -92,6 +95,7 @@ def load_config(explicit: str | None = None) -> Config:
                 name=s.get("name") or s["entity_id"],
                 area=s.get("area", "inside"),
                 metric=s.get("metric", "temperature"),
+                valid_range=tuple(s["valid_range"]) if s.get("valid_range") else None,
             )
         )
 
@@ -102,6 +106,11 @@ def load_config(explicit: str | None = None) -> Config:
             "config: home_assistant is enabled but no token is set "
             "(set home_assistant.token or the HA_TOKEN environment variable)"
         )
+
+    validation_ranges = {
+        metric: {area: tuple(bounds) for area, bounds in (by_area or {}).items()}
+        for metric, by_area in (raw.get("validation") or {}).items()
+    }
 
     return Config(
         latitude=float(location["latitude"]),
@@ -116,4 +125,5 @@ def load_config(explicit: str | None = None) -> Config:
         ha_token=ha_token,
         ha_sensors=sensors,
         interval_minutes=int((raw.get("collection") or {}).get("interval_minutes", 10)),
+        validation_ranges=validation_ranges,
     )
