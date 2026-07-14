@@ -35,11 +35,17 @@ weather-analysis dashboard        # opens at http://localhost:8501
 2. **Backfill history** so the graphs are interesting from day one:
 
    ```bash
-   weather-analysis backfill --days 30
+   weather-analysis backfill --days 240
    ```
 
-   Open-Meteo provides up to 92 days of hourly history; Home Assistant as much as your
-   recorder retention keeps (10 days by default).
+   Three sources, at different resolutions. Open-Meteo's archive has no practical limit.
+   Home Assistant's recorder keeps full-detail history only as long as its `purge_keep_days`
+   (10 by default), but its hourly long-term statistics are kept indefinitely — so a long
+   backfill gets full detail recently and hourly mean/min/max as far back as your Home
+   Assistant has been running.
+
+   Readings outside a plausible range for their area are dropped as sensor glitches and
+   reported. See `validation` in `config.example.yaml`.
 
 3. **Collect continuously** — either keep a loop running:
 
@@ -76,7 +82,7 @@ weather-analysis dashboard        # opens at http://localhost:8501
 |---|---|
 | `weather-analysis collect` | one collection run (Open-Meteo current + HA sensor states) |
 | `weather-analysis collect --loop` | collect forever on `collection.interval_minutes` |
-| `weather-analysis backfill --days N` | fetch past data (Open-Meteo hourly + HA recorder history) |
+| `weather-analysis backfill --days N` | fetch past data (Open-Meteo archive + HA recorder + HA long-term statistics) |
 | `weather-analysis demo` | seed synthetic data to try the dashboard without any setup |
 | `weather-analysis dashboard` | start the Streamlit dashboard |
 
@@ -89,6 +95,11 @@ Everything lands in one long-format SQLite table (`data/weather.db` by default):
 ```
 ts · source · sensor · name · area · metric · value · unit
 ```
+
+`source` distinguishes how a reading was measured: `home_assistant` rows are instantaneous
+samples, `home_assistant_stats` rows are hourly means backfilled from long-term statistics
+(alongside `temperature_min` / `temperature_max` for the same hour). The two overlap wherever
+both exist, and are not expected to agree exactly.
 
 Inserts are idempotent (`UNIQUE(ts, source, sensor, metric)`), so overlapping backfills and
 collection runs are safe. The file is plain SQLite — query it with anything you like.
