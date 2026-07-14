@@ -51,3 +51,16 @@ home_assistant:
 collection:
   # Interval used by `weather-analysis collect --loop`.
   interval_minutes: 10
+
+validation:
+  # Readings outside these ranges are treated as sensor glitches and dropped.
+  # Ranges are per area on purpose: outside is legitimately sub-zero in winter,
+  # so a single global floor would delete real cold weather.
+  temperature:
+    inside: [5, 40]
+    outside: [-40, 60]
+  # A sensor can override its area default with `valid_range`, e.g. a cellar:
+  #   - entity_id: sensor.cellar_temperature
+  #     area: inside
+  #     metric: temperature
+  #     valid_range: [0, 25]
