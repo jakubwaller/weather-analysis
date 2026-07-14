@@ -35,6 +35,11 @@ it.
 Outside data is capped at 92 days by `past_days`, so without a matching change the inside history
 would have nothing to compare against.
 
+Separately, the Bosch sensors emit occasional `0.0` readings — 5 hours across the 8 months
+(2026-06-18 15:00 and 2026-07-14 16:00), each lasting seconds. They are stored faithfully today,
+because `_parse_state` filters only `unavailable`/`unknown`, and they draw as spikes to zero. A
+room dropping sharply is real (an opened window); dropping to 0.0 and back within seconds is not.
+
 ## Goals
 
 - Backfill inside data from HA statistics across its full retention.
@@ -43,6 +48,7 @@ would have nothing to compare against.
   otherwise unrecoverable.
 - Surface inside daily min/mean/max in the dashboard, mirroring the outside chart.
 - Do not let missing data render as a continuous line.
+- Drop sensor glitches (the Bosch `0.0` readings) without touching real temperature swings.
 
 ## Non-goals
 
@@ -61,6 +67,8 @@ would have nothing to compare against.
 | Stored fields | mean + min + max | HA already computed them; hourly means cannot reconstruct a daily swing. |
 | Outside history | Archive endpoint replaces `past_days` | Measured: the archive returns identical variable names and no observable lag (336/336 non-null hours through the current day). Splicing two endpoints would add branching for no measured benefit. |
 | Gap rendering | Preserve NaN in `prepare_series` | Plotly breaks lines at NaN. `.dropna()` removes exactly the markers that would show the outage. |
+| Outlier filtering | Per-area plausibility range | Measured: inside data has an empty band from 0.0 to 10.1 °C. A range separates glitch from signal with 5 °C of headroom either side, and — unlike a despike — needs no neighbouring reading, so it works during live collection. |
+| Range scope | Per **area**, never global | Outside legitimately reads 2.8 °C in November and below zero all winter. A global 5 °C floor would delete the entire heating season, i.e. the reason for this work. |
 
 Rejected: reading `/config/home-assistant_v2.db` directly. It needs no dependency, but couples to
 HA's internal schema, requires co-location, and contradicts the app's remote-HA design
@@ -106,7 +114,60 @@ Unchanged: the `METRICS` map (the archive accepts the same variable names), the 
 (the archive also returns the current day's future hours), and `fetch_current`, which keeps using
 the forecast endpoint because the archive has no `current` block.
 
+### New: `weather_analysis/validate.py`
+
+```
+plausible(measurement, config) -> bool
+filter_implausible(measurements, config) -> tuple[list[Measurement], list[Measurement]]
+```
+
+A reading is dropped when its value falls outside the range for its `(area, metric)`. Built-in
+defaults, chosen from measured data:
+
+| Area | Metric | Range | Rationale |
+|---|---|---|---|
+| inside | temperature | 5 – 40 °C | coldest real reading 10.1 °C; glitch 0.0; 5 °C headroom both ways |
+| outside | temperature | −40 – 60 °C | outside is legitimately sub-zero; only a physical-impossibility guard |
+| any | humidity | 0 – 100 % | definitional |
+
+**No rule means no filtering.** Pressure, wind, precipitation and cloud cover are unfiltered —
+they come from Open-Meteo, which is a model and does not emit sensor glitches.
+
+Two rules that are easy to get wrong:
+
+- **Suffix resolution.** `temperature_min` / `temperature_max` must resolve to the `temperature`
+  range. The glitch arrives almost exclusively via `min` (it perturbs `mean` by ~0.03 °C because
+  it lasts only seconds), so a lookup that misses `temperature_min` filters nothing that matters.
+- **Per-measurement, not per-row.** If an hour's `min` is implausible, drop only that measurement
+  and keep `mean` and `max`. The hour keeps its usable fields.
+
+Overridable in config, both globally and per sensor (e.g. a cellar that legitimately sits at 8 °C):
+
+```yaml
+validation:
+  temperature:
+    inside: [5, 40]
+    outside: [-40, 60]
+
+home_assistant:
+  sensors:
+    - entity_id: sensor.cellar_temperature
+      valid_range: [0, 25]
+```
+
+Dropped readings are **counted and printed**, never discarded silently — a filter that hides its
+own effects is how real data disappears unnoticed.
+
 ### Modified: `weather_analysis/collect.py`
+
+A single `_store(conn, rows, config, label)` helper validates, inserts, and reports, replacing the
+repeated fetch/insert/print blocks. Every source funnels through it, so validation cannot be
+skipped by adding a collector later:
+
+```
+open-meteo history: 5194 readings, 5194 new
+home-assistant history: 8880 readings, 8874 new (3 implausible dropped)
+```
 
 `backfill` calls three sources, each wrapped so one failure cannot abort the others:
 
@@ -176,6 +237,17 @@ Open-Meteo:
 - `days=365` is not clamped to 92.
 - Existing future-hour and `None` tests still pass.
 
+Validation — the cases that protect real data:
+
+- Inside `0.0` dropped; inside `10.1` **kept** (the real 21 Jan open-window morning).
+- Outside `2.8` and `-15.0` **kept** — the regression that would otherwise erase the heating
+  season.
+- `temperature_min` resolves to the `temperature` range, so an implausible `min` is dropped.
+- An hour with implausible `min` but valid `mean`/`max` keeps `mean` and `max`.
+- Metrics with no rule (pressure, cloud cover) pass through untouched.
+- Per-sensor `valid_range` overrides the area default.
+- Dropped counts are reported, not silent.
+
 Dashboard regression:
 
 - `prepare_series` preserves NaN across a gap (the Apr–Jun outage in miniature).
@@ -189,3 +261,17 @@ data" must show a visible break across 2026-04-06 → 2026-06-08 rather than a s
 
 Expect the two inside sources to disagree slightly in the overlap: an hourly mean is not an
 instantaneous sample. That is correct behaviour, not drift.
+
+The deployed database already holds glitch rows from the first backfill. The filter only guards
+new writes, so deployment includes a one-off deletion:
+
+```sql
+DELETE FROM measurements
+WHERE area = 'inside' AND metric LIKE 'temperature%' AND value < 5.0;
+```
+
+Verify it removes exactly the known glitches and nothing else — as of 2026-07-14 that is 3 rows in
+`weather.db` (2026-07-14 16:20–16:23, dining room / bathroom / kitchen). HA's statistics hold 5
+glitch hours in total; the two from 2026-06-18 15:00 (bedroom, dining room) predate the 10-day
+`states` window and will arrive, already filtered, with the statistics backfill. Confirm the count
+before and after rather than assuming.
