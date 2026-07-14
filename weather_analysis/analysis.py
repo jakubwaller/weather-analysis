@@ -52,6 +52,9 @@ def daily_frame(df: pd.DataFrame, metric: str) -> pd.DataFrame:
     Prefers the true hourly min/max Home Assistant recorded; falls back to values
     derived from the mean series, which is all the live period has — statistics
     exist only for backfilled hours.
+
+    Days with no readings stay NaN, so the band and its line break across a gap
+    instead of spanning it.
     """
     mean_src = df[df["metric"] == metric].set_index("ts")["value"]
     daily = mean_src.resample("1D").agg(["min", "mean", "max"])
@@ -59,4 +62,4 @@ def daily_frame(df: pd.DataFrame, metric: str) -> pd.DataFrame:
         true_src = df[df["metric"] == f"{metric}_{field}"].set_index("ts")["value"]
         if not true_src.empty:
             daily[field] = true_src.resample("1D").agg(field).combine_first(daily[field])
-    return daily.dropna(subset=["mean"])
+    return daily
