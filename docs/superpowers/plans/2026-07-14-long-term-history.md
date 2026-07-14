@@ -11,11 +11,10 @@
 ## Global Constraints
 
 - Spec: `docs/superpowers/specs/2026-07-14-long-term-history-design.md`. Read it before starting.
-- Branch: `long-term-history`. Never commit to `main`.
-- Repo: `/private/tmp/claude-503/-Users-jakubwaller-gitlab/0d4eae68-f453-4e4f-be77-d9183e9ee65e/scratchpad/weather-analysis`
+- Branch: `long-term-history`. Never commit to `main`. All paths below are repo-relative.
 - Python `>=3.10`. Use `from __future__ import annotations` in every new module, matching existing ones.
 - New dependency: `websocket-client>=1.7`. Add no others.
-- **Never write Claude, Anthropic, or AI attribution anywhere** — not in code, comments, commit messages, or docs. No `Co-Authored-By` trailers.
+- **No AI or assistant attribution anywhere** — not in code, comments, commit messages, or docs. No `Co-Authored-By` trailers.
 - No schema migration. The long-format `measurements` table absorbs new sources and metrics by design.
 - Existing tests must keep passing: `python -m pytest tests -q` → currently `10 passed`.
 - Match existing style: module docstring, sync `requests`, `session=None` / `client=None` injection seam, no type-annotation churn beyond what neighbouring code does.
