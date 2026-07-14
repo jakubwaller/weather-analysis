@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from weather_analysis.analysis import (
+    contiguous_blocks,
     daily_frame,
     prepare_series,
     resample_rule,
@@ -123,20 +124,24 @@ def _fill(color: str, alpha: float = 0.18) -> str:
 
 def daily_range_chart(daily: pd.DataFrame, title: str, color: str = "#2a78d6") -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=daily.index, y=daily["max"], name="daily max", mode="lines",
-        line=dict(width=0), showlegend=False, hoverinfo="skip",
-    ))
-    fig.add_trace(go.Scatter(
-        x=daily.index, y=daily["min"], name="min–max range", mode="lines",
-        line=dict(width=0), fill="tonexty", fillcolor=_fill(color),
-        hovertemplate="min %{y:.1f} °C<extra></extra>",
-    ))
-    fig.add_trace(go.Scatter(
-        x=daily.index, y=daily["mean"], name="daily mean", mode="lines",
-        line=dict(color=color, width=2),
-        hovertemplate="mean %{y:.1f} °C<extra></extra>",
-    ))
+    # one band per contiguous run: a single filled trace would bridge the gaps
+    for first, block in enumerate(contiguous_blocks(daily)):
+        fig.add_trace(go.Scatter(
+            x=block.index, y=block["max"], name="daily max", mode="lines",
+            line=dict(width=0), showlegend=False, hoverinfo="skip",
+        ))
+        fig.add_trace(go.Scatter(
+            x=block.index, y=block["min"], name="min–max range", mode="lines",
+            line=dict(width=0), fill="tonexty", fillcolor=_fill(color),
+            showlegend=first == 0, legendgroup="range",
+            hovertemplate="min %{y:.1f} °C<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=block.index, y=block["mean"], name="daily mean", mode="lines",
+            line=dict(color=color, width=2),
+            showlegend=first == 0, legendgroup="mean",
+            hovertemplate="mean %{y:.1f} °C<extra></extra>",
+        ))
     fig.update_layout(**LAYOUT, title_text=title)
     return fig
 

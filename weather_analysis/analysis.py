@@ -6,6 +6,7 @@ page; app.py keeps the figure building and page layout.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import timedelta
 
 import pandas as pd
@@ -63,3 +64,18 @@ def daily_frame(df: pd.DataFrame, metric: str) -> pd.DataFrame:
         if not true_src.empty:
             daily[field] = true_src.resample("1D").agg(field).combine_first(daily[field])
     return daily
+
+
+def contiguous_blocks(daily: pd.DataFrame) -> Iterator[pd.DataFrame]:
+    """Split a daily frame into runs of consecutive days that have data.
+
+    A filled band has to be drawn one block at a time: plotly builds the fill
+    polygon from a trace's non-null points, so a single trace spanning a gap
+    bridges it even though the line itself breaks at NaN.
+    """
+    if daily.empty:
+        return
+    has_data = daily["mean"].notna()
+    for _, block in daily.groupby((has_data != has_data.shift()).cumsum()):
+        if block["mean"].notna().all():
+            yield block
