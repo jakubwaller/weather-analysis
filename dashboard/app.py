@@ -16,6 +16,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from weather_analysis.analysis import prepare_series, resample_rule, sensor_labels
+
 DB_PATH = Path(os.environ.get("WEATHER_DB", "data/weather.db"))
 
 # ---------------------------------------------------------------- palette ---
@@ -74,38 +76,6 @@ def load_data(db_path: str) -> pd.DataFrame:
         )
     df["ts"] = pd.to_datetime(df["ts"], utc=True, format="ISO8601")
     return df
-
-
-def sensor_labels(df: pd.DataFrame) -> pd.Series:
-    """Stable display label per sensor: 'Living room · inside'."""
-    return df["name"] + " · " + df["area"]
-
-
-def resample_rule(span: timedelta) -> str | None:
-    """Downsample long ranges so lines stay readable."""
-    if span <= timedelta(days=3):
-        return None
-    if span <= timedelta(days=14):
-        return "30min"
-    if span <= timedelta(days=45):
-        return "1h"
-    return "3h"
-
-
-def prepare_series(df: pd.DataFrame, metric: str, rule: str | None) -> pd.DataFrame:
-    """One row per (sensor label, timestamp) with the mean value in each bucket."""
-    sub = df[df["metric"] == metric].copy()
-    sub["label"] = sensor_labels(sub)
-    if rule:
-        sub = (
-            sub.set_index("ts")
-            .groupby("label")["value"]
-            .resample(rule)
-            .mean()
-            .dropna()
-            .reset_index()
-        )
-    return sub
 
 
 # ------------------------------------------------------------------ charts --
