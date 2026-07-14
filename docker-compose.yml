@@ -1,0 +1,35 @@
+services:
+  collector:
+    build: .
+    image: weather-analysis
+    container_name: weather-analysis-collector
+    command: ["weather-analysis", "collect", "--loop"]
+    restart: unless-stopped
+    env_file:
+      - deploy/weather-analysis.env
+    environment:
+      - TZ=Europe/Berlin
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro   # edit sensors without rebuilding
+      - ./data:/app/data                    # sqlite persists on the host
+    extra_hosts:
+      # Home Assistant runs on the host, not in this compose project.
+      - "host.docker.internal:host-gateway"
+
+  dashboard:
+    build: .
+    image: weather-analysis
+    container_name: weather-analysis-dashboard
+    command: ["weather-analysis", "dashboard"]
+    restart: unless-stopped
+    env_file:
+      - deploy/weather-analysis.env
+    environment:
+      - TZ=Europe/Berlin
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+    ports:
+      - "8502:8501"   # 8501 is already taken on the host by pivalert_ml_serving
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

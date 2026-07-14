@@ -93,6 +93,22 @@ ts · source · sensor · name · area · metric · value · unit
 Inserts are idempotent (`UNIQUE(ts, source, sensor, metric)`), so overlapping backfills and
 collection runs are safe. The file is plain SQLite — query it with anything you like.
 
+## Docker
+
+`docker-compose.yml` runs two containers off one image: `collector` (`collect --loop`) and
+`dashboard` (Streamlit, published on host port 8502).
+
+```bash
+cp config.example.yaml config.yaml                        # edit location + sensors
+cp deploy/weather-analysis.env.example deploy/weather-analysis.env   # add HA_TOKEN
+docker compose up -d --build
+docker compose run --rm collector weather-analysis backfill --days 30
+```
+
+`config.yaml` and `data/` are mounted from the host, so sensors can be edited and the database
+survives a rebuild. If Home Assistant runs on the Docker host rather than in this project, point
+`home_assistant.url` at `http://host.docker.internal:8123`.
+
 ## Development
 
 ```bash

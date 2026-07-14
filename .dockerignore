@@ -1,0 +1,14 @@
+.git/
+.gitignore
+data/
+config.yaml
+config.yml
+deploy/
+tests/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
