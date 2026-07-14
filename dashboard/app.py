@@ -16,7 +16,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from weather_analysis.analysis import prepare_series, resample_rule, sensor_labels
+from weather_analysis.analysis import (
+    daily_frame,
+    prepare_series,
+    resample_rule,
+    sensor_labels,
+)
 
 DB_PATH = Path(os.environ.get("WEATHER_DB", "data/weather.db"))
 
@@ -110,8 +115,13 @@ def delta_chart(delta: pd.DataFrame, title: str) -> go.Figure:
     return fig
 
 
-def daily_range_chart(outside: pd.DataFrame, title: str) -> go.Figure:
-    daily = outside.set_index("ts")["value"].resample("1D").agg(["min", "mean", "max"]).dropna()
+def _fill(color: str, alpha: float = 0.18) -> str:
+    c = color.lstrip("#")
+    r, g, b = (int(c[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def daily_range_chart(daily: pd.DataFrame, title: str, color: str = "#2a78d6") -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=daily.index, y=daily["max"], name="daily max", mode="lines",
@@ -119,12 +129,12 @@ def daily_range_chart(outside: pd.DataFrame, title: str) -> go.Figure:
     ))
     fig.add_trace(go.Scatter(
         x=daily.index, y=daily["min"], name="min–max range", mode="lines",
-        line=dict(width=0), fill="tonexty", fillcolor="rgba(42,120,214,0.18)",
+        line=dict(width=0), fill="tonexty", fillcolor=_fill(color),
         hovertemplate="min %{y:.1f} °C<extra></extra>",
     ))
     fig.add_trace(go.Scatter(
         x=daily.index, y=daily["mean"], name="daily mean", mode="lines",
-        line=dict(color="#2a78d6", width=2),
+        line=dict(color=color, width=2),
         hovertemplate="mean %{y:.1f} °C<extra></extra>",
     ))
     fig.update_layout(**LAYOUT, title_text=title)
@@ -343,9 +353,29 @@ with tab_patterns:
         st.info("No outside temperature data in the selected range.")
     else:
         st.plotly_chart(
-            daily_range_chart(outside_all, "Outside daily min / mean / max"),
+            daily_range_chart(daily_frame(outside_all, "temperature"),
+                              "Outside daily min / mean / max"),
             width="stretch",
         )
+
+    # not temp_now: the true hourly min/max live under their own metrics
+    inside_all = window[window["area"] == "inside"]
+    rooms = sorted(inside_all["name"].unique())
+    if rooms:
+        room = st.selectbox("Room", rooms)
+        room_daily = daily_frame(inside_all[inside_all["name"] == room], "temperature")
+        if not room_daily.empty:
+            st.plotly_chart(
+                daily_range_chart(room_daily, f"{room} daily min / mean / max",
+                                  color=COLOR_BY_LABEL.get(f"{room} · inside", "#2a78d6")),
+                width="stretch",
+            )
+            st.caption(
+                "Backfilled days use the true hourly min/max Home Assistant recorded; "
+                "recent days derive them from the collected readings."
+            )
+
+    if not outside_all.empty:
         st.plotly_chart(
             heatmap_chart(outside_all, "Outside temperature by hour and day"),
             width="stretch",
