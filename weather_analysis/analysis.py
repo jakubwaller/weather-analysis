@@ -18,11 +18,14 @@ def sensor_labels(df: pd.DataFrame) -> pd.Series:
 
 
 def resample_rule(span: timedelta) -> str | None:
-    """Downsample long ranges so lines stay readable."""
+    """Downsample long ranges so lines stay readable.
+
+    1h is the finest bucket: backfilled statistics are hourly, and a finer rule
+    leaves NaN buckets between their readings — the line then breaks at every
+    point and the backfilled stretch renders as fragments or nothing at all.
+    """
     if span <= timedelta(days=3):
         return None
-    if span <= timedelta(days=14):
-        return "30min"
     if span <= timedelta(days=45):
         return "1h"
     return "3h"

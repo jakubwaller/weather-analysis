@@ -26,9 +26,14 @@ def test_sensor_labels_combine_name_and_area():
 
 def test_resample_rule_widens_with_span():
     assert resample_rule(timedelta(days=1)) is None
-    assert resample_rule(timedelta(days=7)) == "30min"
     assert resample_rule(timedelta(days=30)) == "1h"
     assert resample_rule(timedelta(days=200)) == "3h"
+
+
+def test_resample_rule_never_finer_than_hourly_backfill():
+    # backfilled statistics are hourly; a sub-hourly bucket would leave a NaN
+    # between every pair of readings and the line would render as fragments
+    assert resample_rule(timedelta(days=7)) == "1h"
 
 
 def test_prepare_series_preserves_gap_as_nan():
