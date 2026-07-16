@@ -48,8 +48,7 @@ LAYOUT = dict(
     font=dict(family=FONT, color=INK_SECONDARY, size=13),
     paper_bgcolor=SURFACE,
     plot_bgcolor=SURFACE,
-    margin=dict(l=8, r=8, t=48, b=8),
-    title=dict(font=dict(size=15, color=INK), x=0, xanchor="left"),
+    margin=dict(l=8, r=8, t=8, b=8),
     xaxis=dict(gridcolor=GRID, linecolor=BASELINE, zeroline=False,
                tickfont=dict(color=INK_MUTED)),
     yaxis=dict(gridcolor=GRID, linecolor=BASELINE, zeroline=False,
@@ -87,7 +86,15 @@ def load_data(db_path: str) -> pd.DataFrame:
 # ------------------------------------------------------------------ charts --
 
 
-def line_chart(series: pd.DataFrame, colors: dict[str, str], title: str,
+def show_chart(title: str, fig: go.Figure) -> None:
+    """Render the title as page text above the figure. An in-figure title
+    collides with the legend on narrow screens: plotly grows the top margin
+    to fit the title or the wrapped legend rows, not both."""
+    st.markdown(f"**{title}**")
+    st.plotly_chart(fig, width="stretch")
+
+
+def line_chart(series: pd.DataFrame, colors: dict[str, str],
                unit: str, order: list[str]) -> go.Figure:
     fig = go.Figure()
     for label in order:
@@ -99,11 +106,11 @@ def line_chart(series: pd.DataFrame, colors: dict[str, str], title: str,
             mode="lines", line=dict(color=colors[label], width=2),
             hovertemplate="%{y:.1f} " + unit + "<extra>" + label + "</extra>",
         ))
-    fig.update_layout(**LAYOUT, title_text=title, showlegend=len(fig.data) > 1)
+    fig.update_layout(**LAYOUT, showlegend=len(fig.data) > 1)
     return fig
 
 
-def delta_chart(delta: pd.DataFrame, title: str) -> go.Figure:
+def delta_chart(delta: pd.DataFrame) -> go.Figure:
     """Inside − outside difference as a diverging bar around a zero baseline:
     warm (red) when inside is warmer, cool (blue) when outside is warmer."""
     colors = ["#e34948" if v >= 0 else "#2a78d6" for v in delta["value"]]
@@ -112,7 +119,7 @@ def delta_chart(delta: pd.DataFrame, title: str) -> go.Figure:
         hovertemplate="%{y:+.1f} °C<extra>inside − outside</extra>",
     ))
     fig.add_hline(y=0, line_color=BASELINE, line_width=1)
-    fig.update_layout(**LAYOUT, title_text=title, bargap=0, showlegend=False)
+    fig.update_layout(**LAYOUT, bargap=0, showlegend=False)
     return fig
 
 
@@ -122,7 +129,7 @@ def _fill(color: str, alpha: float = 0.18) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-def daily_range_chart(daily: pd.DataFrame, title: str, color: str = "#2a78d6") -> go.Figure:
+def daily_range_chart(daily: pd.DataFrame, color: str = "#2a78d6") -> go.Figure:
     fig = go.Figure()
     # one band per contiguous run: a single filled trace would bridge the gaps
     for first, block in enumerate(contiguous_blocks(daily)):
@@ -142,11 +149,11 @@ def daily_range_chart(daily: pd.DataFrame, title: str, color: str = "#2a78d6") -
             showlegend=first == 0, legendgroup="mean",
             hovertemplate="mean %{y:.1f} °C<extra></extra>",
         ))
-    fig.update_layout(**LAYOUT, title_text=title)
+    fig.update_layout(**LAYOUT)
     return fig
 
 
-def heatmap_chart(outside: pd.DataFrame, title: str) -> go.Figure:
+def heatmap_chart(outside: pd.DataFrame) -> go.Figure:
     sub = outside.copy()
     sub["day"] = sub["ts"].dt.strftime("%b %d")
     sub["day_key"] = sub["ts"].dt.floor("D")
@@ -162,12 +169,11 @@ def heatmap_chart(outside: pd.DataFrame, title: str) -> go.Figure:
         hovertemplate="%{x} %{y}:00 · %{z:.1f} °C<extra></extra>",
     ))
     layout = {**LAYOUT, "hovermode": "closest"}
-    fig.update_layout(**layout, title_text=title,
-                      yaxis_title="hour of day (UTC)")
+    fig.update_layout(**layout, yaxis_title="hour of day (UTC)")
     return fig
 
 
-def scatter_chart(pair: pd.DataFrame, inside_label: str, title: str) -> go.Figure:
+def scatter_chart(pair: pd.DataFrame, inside_label: str) -> go.Figure:
     fig = go.Figure(go.Scatter(
         x=pair["outside"], y=pair["inside"], mode="markers",
         marker=dict(color="#2a78d6", size=8, opacity=0.45,
@@ -175,7 +181,7 @@ def scatter_chart(pair: pd.DataFrame, inside_label: str, title: str) -> go.Figur
         hovertemplate="outside %{x:.1f} °C · inside %{y:.1f} °C<extra></extra>",
     ))
     layout = {**LAYOUT, "hovermode": "closest"}
-    fig.update_layout(**layout, title_text=title,
+    fig.update_layout(**layout,
                       xaxis_title="Outside (°C)", yaxis_title=f"{inside_label} (°C)")
     return fig
 
@@ -293,20 +299,17 @@ with tab_trends:
     if temps.empty:
         st.info("No temperature sensors selected.")
     else:
-        st.plotly_chart(
-            line_chart(temps, COLOR_BY_LABEL, "Temperature over time", "°C", ordered_labels),
-            width="stretch",
-        )
+        show_chart("Temperature over time",
+                   line_chart(temps, COLOR_BY_LABEL, "°C", ordered_labels))
     if selected_metric:
         other = prepare_series(window, selected_metric, rule)
         unit = METRIC_LABELS[selected_metric].split("(")[-1].rstrip(")")
-        st.plotly_chart(
+        show_chart(
+            METRIC_LABELS[selected_metric] + " over time",
             line_chart(other, COLOR_BY_LABEL | {
                 l: CATEGORICAL[0] for l in other["label"].unique()
                 if l not in COLOR_BY_LABEL
-            }, METRIC_LABELS[selected_metric] + " over time", unit,
-                sorted(other["label"].unique())),
-            width="stretch",
+            }, unit, sorted(other["label"].unique())),
         )
 
 with tab_compare:
@@ -322,20 +325,14 @@ with tab_compare:
                 "`area: inside` to your config.")
     else:
         delta = pair["inside"] - pair["outside"]
-        st.plotly_chart(
-            delta_chart(delta.rename("value").rename_axis("ts").reset_index(),
-                        "Inside − outside temperature (hourly)"),
-            width="stretch",
-        )
+        show_chart("Inside − outside temperature (hourly)",
+                   delta_chart(delta.rename("value").rename_axis("ts").reset_index()))
         st.caption("Above zero (red): inside warmer than outside · "
                    "below zero (blue): outside warmer.")
         left, right = st.columns(2)
         with left:
-            st.plotly_chart(
-                scatter_chart(pair, "Inside (avg)",
-                              "Inside vs outside temperature (hourly means)"),
-                width="stretch",
-            )
+            show_chart("Inside vs outside temperature (hourly means)",
+                       scatter_chart(pair, "Inside (avg)"))
         with right:
             corr = pair["inside"].corr(pair["outside"])
             lag_hours, lag_corr = 0, corr
@@ -357,11 +354,8 @@ with tab_patterns:
     if outside_all.empty:
         st.info("No outside temperature data in the selected range.")
     else:
-        st.plotly_chart(
-            daily_range_chart(daily_frame(outside_all, "temperature"),
-                              "Outside daily min / mean / max"),
-            width="stretch",
-        )
+        show_chart("Outside daily min / mean / max",
+                   daily_range_chart(daily_frame(outside_all, "temperature")))
 
     # not temp_now: the true hourly min/max live under their own metrics
     inside_all = window[window["area"] == "inside"]
@@ -370,21 +364,17 @@ with tab_patterns:
         room = st.selectbox("Room", rooms)
         room_daily = daily_frame(inside_all[inside_all["name"] == room], "temperature")
         if not room_daily.empty:
-            st.plotly_chart(
-                daily_range_chart(room_daily, f"{room} daily min / mean / max",
-                                  color=COLOR_BY_LABEL.get(f"{room} · inside", "#2a78d6")),
-                width="stretch",
-            )
+            show_chart(f"{room} daily min / mean / max",
+                       daily_range_chart(room_daily,
+                                         color=COLOR_BY_LABEL.get(f"{room} · inside", "#2a78d6")))
             st.caption(
                 "Backfilled days use the true hourly min/max Home Assistant recorded; "
                 "recent days derive them from the collected readings."
             )
 
     if not outside_all.empty:
-        st.plotly_chart(
-            heatmap_chart(outside_all, "Outside temperature by hour and day"),
-            width="stretch",
-        )
+        show_chart("Outside temperature by hour and day",
+                   heatmap_chart(outside_all))
 
 with tab_table:
     show = window.sort_values("ts", ascending=False).copy()
