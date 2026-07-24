@@ -33,3 +33,12 @@ services:
       - "8502:8501"   # 8501 is already taken on the host by pivalert_ml_serving
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      # web_proxy is the shared network the elternschule Caddy sits on; it
+      # reverse-proxies weather.jakubwaller.eu to this container.
+      - default
+      - web_proxy
+
+networks:
+  web_proxy:
+    external: true
