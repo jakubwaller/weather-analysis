@@ -279,16 +279,22 @@ latest_inside = latest[latest["area"] == "inside"]["value"].mean()
 latest_outside = latest[latest["area"] == "outside"]["value"].mean()
 
 outside_all = temp_now[temp_now["area"] == "outside"]
-cols = st.columns(4)
+# One tile per outside source (API and sensors), Open-Meteo first like the charts.
+latest_by_outside = latest[latest["area"] == "outside"].sort_values(
+    "name", key=lambda s: s.map(lambda n: (0 if n.startswith("Outside (Open-Meteo)") else 1, n))
+)
+cols = st.columns(3 + len(latest_by_outside))
 if pd.notna(latest_inside):
     cols[0].metric("Inside now (avg)", f"{latest_inside:.1f} °C")
-if pd.notna(latest_outside):
-    cols[1].metric("Outside now", f"{latest_outside:.1f} °C")
+for i, (_, row) in enumerate(latest_by_outside.iterrows()):
+    cols[1 + i].metric(f"{row['name']} now", f"{row['value']:.1f} °C")
 if pd.notna(latest_inside) and pd.notna(latest_outside):
-    cols[2].metric("Inside − outside", f"{latest_inside - latest_outside:+.1f} °C")
+    cols[1 + len(latest_by_outside)].metric(
+        "Inside − outside", f"{latest_inside - latest_outside:+.1f} °C")
 if not outside_all.empty:
-    cols[3].metric("Outside min / max in range",
-                   f"{outside_all['value'].min():.1f} / {outside_all['value'].max():.1f} °C")
+    cols[2 + len(latest_by_outside)].metric(
+        "Outside min / max in range",
+        f"{outside_all['value'].min():.1f} / {outside_all['value'].max():.1f} °C")
 
 # --- charts ------------------------------------------------------------------
 tab_trends, tab_compare, tab_patterns, tab_table = st.tabs(
