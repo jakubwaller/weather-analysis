@@ -279,22 +279,25 @@ latest_inside = latest[latest["area"] == "inside"]["value"].mean()
 latest_outside = latest[latest["area"] == "outside"]["value"].mean()
 
 outside_all = temp_now[temp_now["area"] == "outside"]
-# One tile per outside source (API and sensors), Open-Meteo first like the charts.
+# One tile per room and per outside source, Open-Meteo first like the charts.
+latest_by_inside = latest[latest["area"] == "inside"].sort_values("name")
 latest_by_outside = latest[latest["area"] == "outside"].sort_values(
     "name", key=lambda s: s.map(lambda n: (0 if n.startswith("Outside (Open-Meteo)") else 1, n))
 )
-cols = st.columns(3 + len(latest_by_outside))
-if pd.notna(latest_inside):
-    cols[0].metric("Inside now (avg)", f"{latest_inside:.1f} °C")
-for i, (_, row) in enumerate(latest_by_outside.iterrows()):
-    cols[1 + i].metric(f"{row['name']} now", f"{row['value']:.1f} °C")
+tiles = [(f"{row['name']} now", f"{row['value']:.1f} °C")
+         for _, row in pd.concat([latest_by_inside, latest_by_outside]).iterrows()]
 if pd.notna(latest_inside) and pd.notna(latest_outside):
-    cols[1 + len(latest_by_outside)].metric(
-        "Inside − outside", f"{latest_inside - latest_outside:+.1f} °C")
+    tiles.append(("Inside − outside (avg)",
+                  f"{latest_inside - latest_outside:+.1f} °C"))
 if not outside_all.empty:
-    cols[2 + len(latest_by_outside)].metric(
-        "Outside min / max in range",
-        f"{outside_all['value'].min():.1f} / {outside_all['value'].max():.1f} °C")
+    tiles.append(("Outside min / max in range",
+                  f"{outside_all['value'].min():.1f}–{outside_all['value'].max():.1f} °C"))
+# Rows of 4: one long row squeezes tiles until labels and values truncate
+# on narrow viewports (the dashboard is used at high zoom).
+PER_ROW = 4
+for i in range(0, len(tiles), PER_ROW):
+    for col, (label, value) in zip(st.columns(PER_ROW), tiles[i:i + PER_ROW]):
+        col.metric(label, value)
 
 # --- charts ------------------------------------------------------------------
 tab_trends, tab_compare, tab_patterns, tab_table = st.tabs(
