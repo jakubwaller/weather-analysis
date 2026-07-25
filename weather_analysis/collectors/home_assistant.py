@@ -53,7 +53,13 @@ def fetch_current(config: Config, session: requests.Session | None = None) -> li
         if value is None:
             print(f"  warning: entity {sensor.entity_id} is '{data.get('state')}', skipping")
             continue
-        measurements.append(_measurement(sensor, datetime.now(timezone.utc), value,
+        # Stamp the reading with when the sensor actually reported, not when we
+        # polled. Polling faster than the sensor updates then just hits the
+        # UNIQUE constraint instead of storing duplicate readings.
+        ts_raw = data.get("last_changed") or data.get("last_updated")
+        ts = (datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if ts_raw
+              else datetime.now(timezone.utc))
+        measurements.append(_measurement(sensor, ts, value,
                                          data.get("attributes", {}).get("unit_of_measurement")))
     return measurements
 

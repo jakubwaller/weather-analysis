@@ -49,7 +49,9 @@ home_assistant:
     #   metric: humidity
 
 collection:
-  # Interval used by `weather-analysis collect --loop`.
+  # Interval used by `weather-analysis collect --loop`. Home Assistant readings
+  # are stamped with the sensor's own report time, so polling faster than the
+  # sensors update stores no duplicate rows — 1 is a fine value.
   interval_minutes: 10
 
 validation:

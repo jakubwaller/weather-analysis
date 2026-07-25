@@ -84,12 +84,15 @@ def test_ha_current_parses_and_skips_unavailable():
     session = FakeSession({
         "state": "23.4",
         "attributes": {"unit_of_measurement": "°C"},
+        "last_changed": "2026-07-20T09:15:00Z",
     })
     rows = home_assistant.fetch_current(config(), session=session)
     assert len(rows) == 1
     assert rows[0].value == 23.4
     assert rows[0].unit == "°C"
     assert rows[0].name == "Living room"
+    # the sensor's own report time, not the poll time
+    assert rows[0].ts == datetime(2026, 7, 20, 9, 15, tzinfo=timezone.utc)
 
     session = FakeSession({"state": "unavailable", "attributes": {}})
     assert home_assistant.fetch_current(config(), session=session) == []
