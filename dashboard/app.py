@@ -285,7 +285,11 @@ latest_by_outside = latest[latest["area"] == "outside"].sort_values(
     "name", key=lambda s: s.map(lambda n: (0 if n.startswith("Outside (Open-Meteo)") else 1, n))
 )
 tiles = [(f"{row['name']} now", f"{row['value']:.1f} °C")
-         for _, row in pd.concat([latest_by_inside, latest_by_outside]).iterrows()]
+         for _, row in latest_by_inside.iterrows()]
+if pd.notna(latest_inside):
+    tiles.append(("Inside now (avg)", f"{latest_inside:.1f} °C"))
+tiles += [(f"{row['name']} now", f"{row['value']:.1f} °C")
+          for _, row in latest_by_outside.iterrows()]
 if pd.notna(latest_inside) and pd.notna(latest_outside):
     tiles.append(("Inside − outside (avg)",
                   f"{latest_inside - latest_outside:+.1f} °C"))
