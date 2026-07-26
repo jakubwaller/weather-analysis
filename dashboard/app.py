@@ -281,36 +281,65 @@ latest_inside = latest[latest["area"] == "inside"]["value"].mean()
 latest_outside = latest[latest["area"] == "outside"]["value"].mean()
 
 outside_all = temp_now[temp_now["area"] == "outside"]
-# One tile per room and per outside source, Open-Meteo first like the charts.
+
+
+def om_first(names: pd.Series) -> pd.Series:
+    """Sort key: Open-Meteo before the local sensors, like the charts."""
+    return names.map(lambda n: (0 if n.startswith("Outside (Open-Meteo)") else 1, n))
+
+
 latest_by_inside = latest[latest["area"] == "inside"].sort_values("name")
-latest_by_outside = latest[latest["area"] == "outside"].sort_values(
-    "name", key=lambda s: s.map(lambda n: (0 if n.startswith("Outside (Open-Meteo)") else 1, n))
-)
-tiles = [(f"{row['name']} now", f"{row['value']:.1f} °C")
-         for _, row in latest_by_inside.iterrows()]
-if pd.notna(latest_inside):
-    tiles.append(("Inside now (avg)", f"{latest_inside:.1f} °C"))
-tiles += [(f"{row['name']} now", f"{row['value']:.1f} °C")
-          for _, row in latest_by_outside.iterrows()]
+latest_by_outside = latest[latest["area"] == "outside"].sort_values("name", key=om_first)
 hum_latest = (
     window[window["metric"] == "humidity"].sort_values("ts")
     .groupby(["name", "area"]).tail(1)
 )
-hum_outside = hum_latest[hum_latest["area"] == "outside"]["value"].mean()
-if pd.notna(hum_outside):
-    tiles.append(("Outside humidity now", f"{hum_outside:.0f} %"))
-if pd.notna(latest_inside) and pd.notna(latest_outside):
-    tiles.append(("Inside − outside (avg)",
-                  f"{latest_inside - latest_outside:+.1f} °C"))
-if not outside_all.empty:
-    tiles.append(("Outside min / max in range",
-                  f"{outside_all['value'].min():.1f}–{outside_all['value'].max():.1f} °C"))
+hum_by_outside = hum_latest[hum_latest["area"] == "outside"].sort_values("name", key=om_first)
+
 # Rows of 4: one long row squeezes tiles until labels and values truncate
 # on narrow viewports (the dashboard is used at high zoom).
 PER_ROW = 4
-for i in range(0, len(tiles), PER_ROW):
-    for col, (label, value) in zip(st.columns(PER_ROW), tiles[i:i + PER_ROW]):
-        col.metric(label, value)
+
+
+def tile_section(title: str, tiles: list[tuple[str, str]]) -> None:
+    if not tiles:
+        return
+    st.caption(title)
+    for i in range(0, len(tiles), PER_ROW):
+        for col, (label, value) in zip(st.columns(PER_ROW), tiles[i:i + PER_ROW]):
+            col.metric(label, value)
+
+
+inside_tiles = [(row["name"], f"{row['value']:.1f} °C")
+                for _, row in latest_by_inside.iterrows()]
+if pd.notna(latest_inside):
+    inside_tiles.append(("Average", f"{latest_inside:.1f} °C"))
+
+def outside_label(name: str) -> str:
+    """The section header already says outside, so drop it from the sensor
+    name: 'Outside (Open-Meteo)' → 'Open-Meteo', 'Zigbee outside' → 'Zigbee'.
+    Long labels truncate in the tile at the zoom level this page is used at."""
+    if name.startswith("Outside (") and name.endswith(")"):
+        return name[len("Outside ("):-1]
+    return name.replace(" outside", "").replace("outside ", "").strip() or name
+
+
+outside_tiles = [(outside_label(row["name"]), f"{row['value']:.1f} °C")
+                 for _, row in latest_by_outside.iterrows()]
+outside_tiles += [(f"{outside_label(row['name'])} humidity", f"{row['value']:.0f} %")
+                  for _, row in hum_by_outside.iterrows()]
+
+summary_tiles = []
+if pd.notna(latest_inside) and pd.notna(latest_outside):
+    summary_tiles.append(("Inside − outside now",
+                          f"{latest_inside - latest_outside:+.1f} °C"))
+if not outside_all.empty:
+    summary_tiles.append(("Outside min / max in range",
+                          f"{outside_all['value'].min():.1f}–{outside_all['value'].max():.1f} °C"))
+
+tile_section("Inside now", inside_tiles)
+tile_section("Outside now", outside_tiles)
+tile_section("Summary", summary_tiles)
 
 # --- charts ------------------------------------------------------------------
 tab_trends, tab_compare, tab_patterns, tab_table = st.tabs(
