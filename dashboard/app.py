@@ -250,8 +250,10 @@ ordered_labels = ordered_labels[: len(CATEGORICAL)]  # 8-series ceiling
 selected = st.sidebar.multiselect("Temperature sensors", ordered_labels,
                                   default=ordered_labels)
 
+# humidity has its own chart in Trends, so it is not offered here
 extra_metrics = sorted(
-    m for m in window["metric"].unique() if m != "temperature" and m in METRIC_LABELS
+    m for m in window["metric"].unique()
+    if m not in ("temperature", "humidity") and m in METRIC_LABELS
 )
 selected_metric = st.sidebar.selectbox(
     "Secondary metric", extra_metrics,
@@ -290,6 +292,13 @@ if pd.notna(latest_inside):
     tiles.append(("Inside now (avg)", f"{latest_inside:.1f} °C"))
 tiles += [(f"{row['name']} now", f"{row['value']:.1f} °C")
           for _, row in latest_by_outside.iterrows()]
+hum_latest = (
+    window[window["metric"] == "humidity"].sort_values("ts")
+    .groupby(["name", "area"]).tail(1)
+)
+hum_outside = hum_latest[hum_latest["area"] == "outside"]["value"].mean()
+if pd.notna(hum_outside):
+    tiles.append(("Outside humidity now", f"{hum_outside:.0f} %"))
 if pd.notna(latest_inside) and pd.notna(latest_outside):
     tiles.append(("Inside − outside (avg)",
                   f"{latest_inside - latest_outside:+.1f} °C"))
@@ -314,6 +323,21 @@ with tab_trends:
     else:
         show_chart("Temperature over time",
                    line_chart(temps, COLOR_BY_LABEL, "°C", ordered_labels))
+    hums = prepare_series(window, "humidity", rule)
+    if not hums.empty:
+        # Same sensors as the temperature chart, so reuse their colors; a
+        # humidity-only sensor takes the first hue not claimed by any of them.
+        hum_order = sorted(
+            hums["label"].unique(),
+            key=lambda l: (0 if l.startswith("Outside (Open-Meteo)") else 1, l),
+        )
+        free = [c for c in CATEGORICAL if c not in COLOR_BY_LABEL.values()] or CATEGORICAL
+        hum_colors = COLOR_BY_LABEL | {
+            l: free[i % len(free)]
+            for i, l in enumerate(l for l in hum_order if l not in COLOR_BY_LABEL)
+        }
+        show_chart("Humidity over time",
+                   line_chart(hums, hum_colors, "%", hum_order))
     if selected_metric:
         other = prepare_series(window, selected_metric, rule)
         unit = METRIC_LABELS[selected_metric].split("(")[-1].rstrip(")")
