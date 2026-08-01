@@ -50,6 +50,49 @@ def test_prepare_series_preserves_gap_as_nan():
     assert out["label"].unique().tolist() == ["Living room · inside"]
 
 
+def test_prepare_series_bridges_stable_sensor_silence():
+    # a change-only sensor at a stable 21.0 °C: one reading, then 4 silent
+    # hours, then a change — the silence means "unchanged", so no gap
+    df = frame([
+        (pd.Timestamp("2026-07-28 09:14", tz="UTC"), "Bedroom", "inside", "temperature", 21.0),
+        (pd.Timestamp("2026-07-28 13:41", tz="UTC"), "Bedroom", "inside", "temperature", 21.4),
+    ])
+
+    out = prepare_series(df, "temperature", "1h")
+
+    assert not out["value"].isna().any()
+    # the filled buckets carry the last reading, not an interpolation
+    assert out["value"].tolist() == [21.0, 21.0, 21.0, 21.0, 21.4]
+
+
+def test_prepare_series_fill_stops_at_limit():
+    # 10 silent hours is longer than any stable-value silence the sensors
+    # produce — treat it as an outage and keep the line break
+    df = frame([
+        (pd.Timestamp("2026-07-28 09:00", tz="UTC"), "Bedroom", "inside", "temperature", 21.0),
+        (pd.Timestamp("2026-07-28 19:00", tz="UTC"), "Bedroom", "inside", "temperature", 21.4),
+    ])
+
+    out = prepare_series(df, "temperature", "1h")
+
+    assert out["value"].isna().sum() == 9 - 6  # 9 empty buckets, 6 filled
+
+
+def test_prepare_series_fill_does_not_cross_sensors():
+    # Kitchen reports during Bedroom's silence: its values must not leak
+    # into Bedroom's buckets
+    df = frame([
+        (pd.Timestamp("2026-07-28 09:00", tz="UTC"), "Bedroom", "inside", "temperature", 21.0),
+        (pd.Timestamp("2026-07-28 12:00", tz="UTC"), "Bedroom", "inside", "temperature", 21.4),
+        (pd.Timestamp("2026-07-28 10:00", tz="UTC"), "Kitchen", "inside", "temperature", 25.0),
+    ])
+
+    out = prepare_series(df, "temperature", "1h")
+
+    bedroom = out[out["label"] == "Bedroom · inside"]
+    assert bedroom["value"].tolist() == [21.0, 21.0, 21.0, 21.4]
+
+
 def test_prepare_series_without_rule_returns_raw_points():
     ts = pd.date_range("2026-07-14", periods=3, freq="10min", tz="UTC")
     df = frame([(t, "Bedroom", "inside", "temperature", 21.0) for t in ts])
