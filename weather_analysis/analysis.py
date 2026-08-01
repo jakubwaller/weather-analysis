@@ -31,11 +31,19 @@ def resample_rule(span: timedelta) -> str | None:
     return "3h"
 
 
+# Change-only sensors write nothing while the value is stable, so short runs of
+# empty buckets mean "unchanged", not "unknown" — carry the last reading across
+# up to 6 silent hours. Anything longer (dead battery, Zigbee dropout) stays
+# NaN and keeps its line break.
+FFILL_LIMIT = {"1h": 6, "3h": 2}
+
+
 def prepare_series(df: pd.DataFrame, metric: str, rule: str | None) -> pd.DataFrame:
     """One row per (sensor label, timestamp) with the mean value in each bucket.
 
-    Empty buckets stay NaN. Plotly breaks a line at NaN, which is what draws a
-    real gap rather than a straight line across missing data.
+    Empty buckets beyond the forward-fill limit stay NaN. Plotly breaks a line
+    at NaN, which is what draws a real gap rather than a straight line across
+    missing data.
     """
     sub = df[df["metric"] == metric].copy()
     sub["label"] = sensor_labels(sub)
@@ -45,6 +53,8 @@ def prepare_series(df: pd.DataFrame, metric: str, rule: str | None) -> pd.DataFr
             .groupby("label")["value"]
             .resample(rule)
             .mean()
+            .groupby(level="label")
+            .ffill(limit=FFILL_LIMIT[rule])
             .reset_index()
         )
     return sub
