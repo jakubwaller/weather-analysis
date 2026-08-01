@@ -23,6 +23,7 @@ from weather_analysis.analysis import (
     resample_rule,
     sensor_labels,
 )
+from weather_analysis.db import to_utc_iso
 
 DB_PATH = Path(os.environ.get("WEATHER_DB", "data/weather.db"))
 
@@ -73,14 +74,52 @@ METRIC_LABELS = {
 
 
 @st.cache_data(ttl=60)
-def load_data(db_path: str) -> pd.DataFrame:
+def load_data(db_path: str, start_iso: str | None, end_iso: str | None) -> pd.DataFrame:
+    """Load only the selected window; the full table is seconds of Pi time.
+
+    ts is compared as text: every row is written through to_utc_iso, so the
+    strings share one format and lexicographic order is chronological order —
+    which also lets SQLite use idx_measurements_ts.
+    """
+    query = "SELECT ts, source, sensor, name, area, metric, value, unit FROM measurements"
+    clauses, params = [], []
+    if start_iso:
+        clauses.append("ts >= ?")
+        params.append(start_iso)
+    if end_iso:
+        clauses.append("ts <= ?")
+        params.append(end_iso)
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
     with sqlite3.connect(db_path) as conn:
-        df = pd.read_sql_query(
-            "SELECT ts, source, sensor, name, area, metric, value, unit FROM measurements",
-            conn,
-        )
+        df = pd.read_sql_query(query, conn, params=params)
     df["ts"] = pd.to_datetime(df["ts"], utc=True, format="ISO8601")
     return df
+
+
+@st.cache_data(ttl=60)
+def earliest_iso(db_path: str) -> str | None:
+    """MIN over the text column is chronological for the same reason load_data
+    can compare it; None doubles as the empty-database signal."""
+    with sqlite3.connect(db_path) as conn:
+        return conn.execute("SELECT MIN(ts) FROM measurements").fetchone()[0]
+
+
+@st.cache_data(ttl=60)
+def temperature_labels(db_path: str) -> list[str]:
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT name, area FROM measurements WHERE metric = 'temperature'"
+        ).fetchall()
+    return list(sensor_labels(pd.DataFrame(rows, columns=["name", "area"])).unique())
+
+
+@st.cache_data(ttl=60)
+def window_csv(db_path: str, start_iso: str | None, end_iso: str | None,
+               _window: pd.DataFrame) -> bytes:
+    """Keyed on the query bounds rather than the frame: hashing the frame every
+    rerun would cost about as much as the serialisation this cache avoids."""
+    return _window.to_csv(index=False).encode()
 
 
 # ------------------------------------------------------------------ charts --
@@ -201,8 +240,8 @@ if not DB_PATH.exists():
     )
     st.stop()
 
-df = load_data(str(DB_PATH))
-if df.empty:
+earliest = earliest_iso(str(DB_PATH))
+if earliest is None:
     st.title("Weather analysis")
     st.warning("The database is empty — run `weather-analysis collect` or `weather-analysis demo` first.")
     st.stop()
@@ -219,7 +258,9 @@ RANGES = {
     "Custom": "custom",
 }
 choice = st.sidebar.radio("Time range", list(RANGES), index=1)
-now = datetime.now(timezone.utc)
+# floored to the minute: a start that shifts every rerun would never hit the
+# load_data cache, and the minute rollover is the refresh cadence anyway
+now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
 if RANGES[choice] == "custom":
     default_start = (now - timedelta(days=7)).date()
     picked = st.sidebar.date_input(
@@ -230,17 +271,20 @@ if RANGES[choice] == "custom":
     start = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
     end = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
 elif RANGES[choice] is None:
-    start, end = df["ts"].min().to_pydatetime(), now
+    start, end = datetime.fromisoformat(earliest), now
 else:
     start, end = now - RANGES[choice], now
 
-window = df[(df["ts"] >= start) & (df["ts"] <= end)]
+if RANGES[choice] is None:
+    start_iso = end_iso = None
+else:
+    start_iso, end_iso = to_utc_iso(start), to_utc_iso(end)
+window = load_data(str(DB_PATH), start_iso, end_iso)
 
 # Fixed color per sensor across the WHOLE database, so filters never repaint
 # surviving series. Outside API first, then sensors in first-seen order.
-all_labels = sensor_labels(df[df["metric"] == "temperature"])
 ordered_labels = sorted(
-    all_labels.unique(),
+    temperature_labels(str(DB_PATH)),
     key=lambda l: (0 if l.startswith("Outside (Open-Meteo)") else 1, l),
 )
 COLOR_BY_LABEL = {label: CATEGORICAL[i % len(CATEGORICAL)]
@@ -451,7 +495,7 @@ with tab_table:
     )
     st.download_button(
         "Download CSV",
-        window.to_csv(index=False).encode(),
+        window_csv(str(DB_PATH), start_iso, end_iso, window),
         file_name="weather-data.csv",
         mime="text/csv",
     )
